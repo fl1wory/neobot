@@ -3,11 +3,10 @@ import logging
 import sys
 import sqlite3
 import datetime
-from aiogram.filters import CommandStart, Command, CommandObject
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, BotCommand, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Bot, Dispatcher, F
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from pyexpat.errors import messages
 
 from handlers import *  # Припускаємо, що ваші модулі database та alcohol знаходяться в handlers
 
@@ -118,27 +117,27 @@ async def del_ingredient(message: Message, command: object) -> None:
 
 @dp.message(Command("add_recipe"))
 async def add_recipe(message: Message, command: object) -> None:
-    await database.add_recipe(message, command)
+    await alcohol.add_recipe(message, command)
 
 @dp.message(Command("delete_recipe"))
 async def delete_recipe(message: Message, command: object):
-    await database.db_delete_recipe(message, command)
+    await alcohol.db_delete_recipe(message, command)
 
 @dp.message(Command("add_process"))
 async def add_process_handler(message: Message, command: object):
-    await database.db_add_process(message, command)
+    await alcohol.db_add_process(message, command)
 
 @dp.message(Command("delete_process"))
 async def delete_process_handler(message: Message, command: object):
-    await database.db_delete_process(message, command)
+    await alcohol.db_delete_process(message, command)
 
 @dp.message(Command("inventory"))
 async def inventory_handler(message: Message):
-    await database.view_inventory(message)
+    await alcohol.view_inventory(message)
 
 @dp.message(Command('processes'))
 async def processes_command(message: Message):
-    processes = await database.get_all_available_processes()
+    processes = await alcohol.get_all_available_processes()
     if processes:
         text = "Доступні процеси приготування:\n\n"
         for proc in processes:
@@ -149,7 +148,7 @@ async def processes_command(message: Message):
 
 @dp.message(Command('ingredients'))
 async def ingredients_command(message: Message):
-    ingredients = await database.get_all_ingredients()
+    ingredients = await alcohol.get_all_ingredients()
     if ingredients:
         text = "Наявні інгредієнти:\n" + "\n".join(f"- {ingr}" for ingr in ingredients)
     else:
@@ -158,7 +157,7 @@ async def ingredients_command(message: Message):
 
 @dp.message(Command('recipes'))
 async def recipes_command(message: Message):
-    recipes = await database.get_all_recipes()
+    recipes = await alcohol.get_all_recipes()
     if recipes:
         text = "Наявні рецепти:\n\n"
         for rec in recipes:
