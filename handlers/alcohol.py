@@ -82,14 +82,14 @@ async def add_recipe(message: Message, command: object):
     # 2) Парсимо аргументи: очікуємо 6 частин через кому
     args = command.args or ""
     parts = [p.strip() for p in args.split(",")]
-    if len(parts) != 6:
+    if len(parts) != 7:
         await message.reply(
             "Неправильний формат! Використання:\n"
             "/add_recipe Назва, ing1, ing2, ing3, ing4, процес"
         )
         return
 
-    title, ing1, ing2, ing3, ing4, process = parts
+    title, ing1, ing2, ing3, ing4, process, time = parts
 
     # 3) Перевіряємо, чи такий рецепт вже є в alcohol_base
     con = sqlite3.connect("main.db")
@@ -103,8 +103,9 @@ async def add_recipe(message: Message, command: object):
            AND ing3 = ?
            AND ing4 = ?
            AND process = ?
+           AND time = ?
         """,
-        (title, ing1, ing2, ing3, ing4, process)
+        (title, ing1, ing2, ing3, ing4, process, time)
     )
     if cur.fetchone():
         await message.reply("Такий рецепт уже існує в базі.")
@@ -115,10 +116,10 @@ async def add_recipe(message: Message, command: object):
     cur.execute(
         """
         INSERT INTO alcohol_base
-          (title, ing1, ing2, ing3, ing4, process)
+          (title, ing1, ing2, ing3, ing4, process, time)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (title, ing1, ing2, ing3, ing4, process)
+        (title, ing1, ing2, ing3, ing4, process, time)
     )
     con.commit()
     con.close()
@@ -293,7 +294,7 @@ async def get_all_recipes():
     def db_query():
         con = sqlite3.connect("main.db")
         cur = con.cursor()
-        cur.execute("SELECT title, ing1, ing2, ing3, ing4, process FROM alcohol_base")
+        cur.execute("SELECT title, ing1, ing2, ing3, ing4, process, time FROM alcohol_base")
         rows = cur.fetchall()
         con.close()
         return rows
@@ -306,7 +307,8 @@ async def get_all_recipes():
             "ing2": row[2],
             "ing3": row[3],
             "ing4": row[4],
-            "process": row[5]
+            "process": row[5],
+            "time": row[6]
         }
         for row in rows
     ]

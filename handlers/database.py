@@ -13,7 +13,7 @@ async def db_start():
     cur.execute('''CREATE TABLE IF NOT EXISTS users (id text, username text, account real)''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS alcohol_base
-                    (title text, ing1 text, ing2 text, ing3 text, ing4 text, process text)''')
+                    (title text, ing1 text, ing2 text, ing3 text, ing4 text, process text, time real)''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS alcohol_ingredients
                         (title text)''')
@@ -22,7 +22,7 @@ async def db_start():
                             (title text, cost real)''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS alcohol_inventory
-               (id text, title text, exposure real, value real, production_date text)''')
+               (id text, title text, exposure real, value real, production_date text, is_cooked bool)''')
 
     con.commit()
     con.close()

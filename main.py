@@ -164,7 +164,8 @@ async def recipes_command(message: Message):
             text += (
                 f"Рецепт: {rec['title']}\n"
                 f"Інгредієнти: {rec['ing1']}, {rec['ing2']}, {rec['ing3']}, {rec['ing4']}\n"
-                f"Процес: {rec['process']}\n\n"
+                f"Процес: {rec['process']}, Тривалість: {rec['time']} \n\n"
+
             )
     else:
         text = "Рецептів не знайдено."
@@ -198,7 +199,7 @@ async def brew_command(message: Message):
     if len(parts) < 2:
         await message.reply("Будь ласка, вкажіть назву алкоголю, наприклад: /brew Vodka")
         return
-    alcohol_name = parts[1].strip().lower()
+    alcohol_name = parts[1].strip()
     # Ініціалізуємо сесію для користувача
     brew_sessions[message.from_user.id] = {
         "alcohol_name": alcohol_name,
@@ -206,23 +207,21 @@ async def brew_command(message: Message):
         "processes": []
     }
     # Створюємо початкову клавіатуру з кнопками "Створити" та "Закрити"
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Створити", callback_data="brew_create"),
-                InlineKeyboardButton(text="Закрити", callback_data="brew_close")
-            ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Створити", callback_data="brew_create"),
+            InlineKeyboardButton(text="Закрити", callback_data="brew_close")
         ]
-    )
+    ])
     await message.reply(f"Запуск процесу варки алкоголю: {alcohol_name}", reply_markup=keyboard)
 
-
 # Обробка callback-запитів, пов’язаних з варкою алкоголю
-@dp.callback_query(F.data.startswith("brew_"))
+@dp.callback_query(lambda c: c.data and c.data.startswith("brew_"))
 async def process_brew(callback_query: CallbackQuery):
     data = callback_query.data
     user_id = callback_query.from_user.id
 
+    # Перевірка, чи є користувач (якщо така функція визначена в database.is_user)
     if not await database.is_user(callback_query.message, user_id):
         await callback_query.answer("Користувач не знайдений. Зареєструйся командою /user", show_alert=True)
         return
@@ -237,22 +236,19 @@ async def process_brew(callback_query: CallbackQuery):
         await callback_query.message.edit_text("Процес варки скасовано.")
         brew_sessions.pop(user_id, None)
         await callback_query.answer()
+        return
 
     elif data == "brew_create":
         # Відображення клавіатури з інгредієнтами
         ingredients = get_alcohol_ingredients()
         buttons = [[InlineKeyboardButton(text=ing, callback_data=f"brew_ing|{ing}")] for ing in ingredients]
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        buttons = [
-            [InlineKeyboardButton(text=ing, callback_data=f"brew_ing|{ing}")]
-            for ing in ingredients
-        ]
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
         await callback_query.message.edit_text("Вибери перший інгредієнт", reply_markup=keyboard)
         await callback_query.answer()
+        return
 
     elif data.startswith("brew_ing|"):
-        # 1) Дістаємо назву і додаємо в сесію
+        # Додаємо вибраний інгредієнт до сесії
         ing = data.split("|", 1)[1]
         if len(session["ingredients"]) < 4:
             session["ingredients"].append(ing)
@@ -260,106 +256,117 @@ async def process_brew(callback_query: CallbackQuery):
             await callback_query.answer("Ви вже вибрали 4 інгредієнти", show_alert=True)
             return
 
-        # 2) Якщо ще менше ніж 4 – питаємо наступний інгредієнт
+        # Якщо інгредієнтів менше 4, запитуємо наступний інгредієнт
         if len(session["ingredients"]) < 4:
             ingredients = get_alcohol_ingredients()
-            buttons = [
-                [InlineKeyboardButton(text=ingr, callback_data=f"brew_ing|{ingr}")]
-                for ingr in ingredients
-            ]
+            buttons = [[InlineKeyboardButton(text=ingr, callback_data=f"brew_ing|{ingr}")] for ingr in ingredients]
             keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
             await callback_query.message.edit_text(
                 f"Вибери інгредієнт {len(session['ingredients']) + 1}/4",
                 reply_markup=keyboard
             )
-        # 3) Якщо рівно 4 – переходимо до вибору процесу
+        # Якщо вибрано 4 інгредієнти – переходимо до вибору процесу
         else:
             processes = get_alcohol_processes()
-            buttons = [
-                [InlineKeyboardButton(text=f"{proc} (-{cost})", callback_data=f"brew_proc|{proc}|{cost}")]
-                for proc, cost in processes
-            ]
+            # Формуємо кнопки. Якщо процес є "настоювання", то час не потрібен та callback включає час=0,
+            # інакше callback без часу – буде запитувати введення.
+            buttons = []
+            for proc, cost in processes:
+                if proc.lower() == "настоювання":
+                    cb_data = f"brew_proc|{proc}|{cost}|0"
+                else:
+                    cb_data = f"brew_proc|{proc}|{cost}"
+                buttons.append([InlineKeyboardButton(text=f"{proc} (-{cost})", callback_data=cb_data)])
             keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
             await callback_query.message.edit_text(
                 "Усі інгредієнти вибрані. Тепер оберіть процес приготування:",
                 reply_markup=keyboard
             )
-
         await callback_query.answer()
-
+        return
 
     elif data.startswith("brew_proc|"):
-        # Обробка вибору процесу
         parts = data.split("|")
-        if len(parts) < 3:
-            await callback_query.answer("Некоректні дані процесу", show_alert=True)
-            return
         proc = parts[1]
         try:
-            cost = float(parts[2])
-        except ValueError:
-            await callback_query.answer("Некоректна вартість процесу", show_alert=True)
+            base_cost = float(parts[2])
+        except (IndexError, ValueError):
+            await callback_query.answer("Некоректні дані процесу", show_alert=True)
             return
-        session["processes"].append({"process": proc, "cost": cost})
-        # Якщо вибрано менше 4 інгредієнтів – показуємо клавіатуру для вибору наступного інгредієнту без кнопки завершення
-        if len(session["ingredients"]) < 4:
-            ingredients = get_alcohol_ingredients()
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard = [
-                    [
-                        InlineKeyboardButton(text="Створити",
-                        callback_data="brew_create"),
-                        InlineKeyboardButton(text="Закрити",
-                        callback_data="brew_close")
-                    ]
-                ]
-            )
-            await callback_query.message.edit_text("Вибери наступний інгредієнт", reply_markup=keyboard)
+
+        # Якщо процес "настоювання", час не вводиться – встановлюємо time=0
+        if proc.lower() == "настоювання":
+            time_value = 0.0
+            cost = base_cost  # встановлюється початкова вартість
+            session["processes"].append({"process": proc, "cost": cost, "time": time_value})
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Завершити приготування", callback_data="brew_finish")]
+            ])
+            await callback_query.message.edit_text("Ви вибрали 4 інгредієнти. Завершіть приготування.",
+                                                   reply_markup=keyboard)
+            await callback_query.answer()
         else:
-            # Якщо вже вибрано 4 інгредієнти – показуємо клавіатуру з кнопкою завершення
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard = [
-                     [InlineKeyboardButton(text="Завершити приготування",
-                      callback_data="brew_finish")]
-                ]
-            )
-            await callback_query.message.edit_text("Ви вибрали 4 інгредієнти. Завершіть приготування.", reply_markup=keyboard)
-        await callback_query.answer()
+            # Якщо час не вказано в callback (тобто parts має довжину 3), запитуємо введення часу користувачем
+            if len(parts) == 3:
+                session["pending_process"] = {"process": proc, "base_cost": base_cost}
+                await callback_query.message.edit_text("Введіть час процесу (у годинах):")
+                await callback_query.answer()
+                return
+            else:
+                try:
+                    time_value = float(parts[3])
+                except ValueError:
+                    await callback_query.answer("Некоректна тривалість процесу", show_alert=True)
+                    return
+                # Якщо time_value == 0 і процес не є "настоювання", то cost = base_cost
+                cost = base_cost * (time_value if time_value != 0 else 1)
+                session["processes"].append({"process": proc, "cost": cost, "time": time_value})
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Завершити приготування", callback_data="brew_finish")]
+                ])
+                await callback_query.message.edit_text("Ви вибрали 4 інгредієнти. Завершіть приготування.",
+                                                       reply_markup=keyboard)
+                await callback_query.answer()
+        return
 
     elif data == "brew_finish":
         # Фінальний крок – завершення процесу
         total_cost = sum(item["cost"] for item in session["processes"])
 
-        # Перевіряємо, чи існує користувач у таблиці users; якщо ні — додаємо його з початковим рахунком (наприклад, 1000)
+        # Перевіряємо, чи існує користувач у таблиці users
         user_id_str = str(user_id)
         con = sqlite3.connect("main.db")
         cur = con.cursor()
         cur.execute("SELECT account FROM users WHERE id = ?", (user_id_str,))
         row = cur.fetchone()
         if not row:
-            cur.execute("INSERT INTO users (id, username, account) VALUES (?, ?, ?)",
-                        (user_id_str, callback_query.from_user.full_name, 1000))
-            current_account = 1000
+            await callback_query.message.edit_text("Ви не користувач, зареєструйтесь командою /user")
+            con.close()
+            return
         else:
             current_account = row[0]
 
-        n = current_account - total_cost
-        if n < 0:
-            await callback_query.message.edit_text("Недостатньо шекелів. Продукт не було виготовлено")
+        if current_account - total_cost < 0:
+            await callback_query.message.edit_text("Недостатньо коштів. Продукт не було виготовлено")
+            con.close()
             return
-        else:
-            new_account = current_account - total_cost
+        new_account = current_account - total_cost
         cur.execute("UPDATE users SET account = ? WHERE id = ?", (new_account, user_id_str))
         con.commit()
         con.close()
 
-        # Формуємо дані продукту для порівняння з таблицею alcohol_base
+        # Формуємо дані для порівняння з таблицею alcohol_base
         ings = session["ingredients"]
         ings += [""] * (4 - len(ings))  # Заповнюємо, якщо вибрано менше 4 інгредієнтів
         processes_str = ", ".join([p["process"] for p in session["processes"]])
         alcohol_title = session["alcohol_name"]
 
-        # Порівнюємо з таблицею alcohol_base (за назвою, інгредієнтами та процесом)
+        # Порівнюємо з таблицею alcohol_base (також враховуємо час процесу, збережений у рецепті)
+        time_from_recipe = 0
+        # Припустимо, що якщо серед обраних процесів є значення часу, то беремо суму
+        for p in session["processes"]:
+            time_from_recipe += p["time"]
+
         con = sqlite3.connect("main.db")
         cur = con.cursor()
         cur.execute("""SELECT * FROM alcohol_base 
@@ -368,23 +375,30 @@ async def process_brew(callback_query: CallbackQuery):
                          AND ing2 = ? 
                          AND ing3 = ? 
                          AND ing4 = ? 
-                         AND process = ?""",
-                    (alcohol_title, ings[0], ings[1], ings[2], ings[3], processes_str))
+                         AND process = ?
+                         AND time = ?""",
+                    (alcohol_title, ings[0], ings[1], ings[2], ings[3], processes_str, time_from_recipe))
         base_match = cur.fetchone()
         if base_match:
-            # Якщо продукт знайдено в базі, обчислюємо його витримку.
-            # Припустимо, що момент приготування — сьогодні, тому різниця в днях буде 0.
-            production_date = datetime.date.today()
+            # Продукт знайдено – записуємо час виготовлення та інші дані
+            production_date = datetime.datetime.now()
             exposure = 0  # на момент створення
-            value = exposure * 10  # коефіцієнт
+            value = exposure * 10  # приклад розрахунку вартості
+            # Записуємо товар в інвентар із is_cooked = False
             cur.execute(
-                "INSERT INTO alcohol_inventory (id, title, exposure, value, production_date) VALUES (?, ?, ?, ?, ?)",
-                (user_id, alcohol_title, exposure, value, production_date.isoformat()))
+                "INSERT INTO alcohol_inventory (id, title, exposure, value, production_date, is_cooked) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, alcohol_title, exposure, value, production_date.isoformat(), False))
             inventory_message = "Продукт приготовано згідно рецепту, запис додано до інвентарю."
+            con.commit()
+            con.close()
+
+            # Якщо час для процесу > 0, запускаємо відлік для оновлення is_cooked
+            if time_from_recipe > 0:
+                await asyncio.create_task(schedule_cooking_update(user_id, alcohol_title, time_from_recipe))
         else:
             inventory_message = "Процес приготування продукту порушено, запис в інвентар не здійснено."
-        con.commit()
-        con.close()
+            con.commit()
+            con.close()
 
         result_text = (f"Приготування завершено!\n"
                        f"Алкоголь: {alcohol_title}\n"
@@ -398,6 +412,45 @@ async def process_brew(callback_query: CallbackQuery):
 
     else:
         await callback_query.answer("Невідома дія", show_alert=True)
+
+# Обробник повідомлень для введення часу процесу (якщо процес не «настоювання»)
+@dp.message(lambda message: message.from_user.id in brew_sessions and "pending_process" in brew_sessions[message.from_user.id])
+async def process_time_input(message: Message):
+    user_id = message.from_user.id
+    session = brew_sessions[user_id]
+    try:
+        time_value = float(message.text)
+    except ValueError:
+        await message.reply("Введіть числове значення часу (у годинах)!")
+        return
+
+    pending = session.pop("pending_process")
+    proc = pending["process"]
+    base_cost = pending["base_cost"]
+    # Якщо time_value == 0, тоді cost = base_cost (тобто початкова вартість процесу)
+    cost = base_cost * (time_value if time_value != 0 else 1)
+    session["processes"].append({"process": proc, "cost": cost, "time": time_value})
+
+    # Якщо 4 інгредієнти вже вибрано – переходимо до завершення
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Завершити приготування", callback_data="brew_finish")]
+    ])
+    await message.reply("Час процесу збережено. Натисніть 'Завершити приготування' для завершення.", reply_markup=keyboard)
+
+# Асинхронна функція для оновлення значення is_cooked після спливу часу
+async def schedule_cooking_update(user_id, alcohol_title, cooking_time_hours):
+    """
+    Функція чекає заданий час (у годинах, перетворюється в секунди)
+    та після цього оновлює значення is_cooked на True для запису в інвентарі.
+    """
+    delay = cooking_time_hours * 3600  # переводимо години у секунди
+    await asyncio.sleep(delay)
+    con = sqlite3.connect("main.db")
+    cur = con.cursor()
+    cur.execute("UPDATE alcohol_inventory SET is_cooked = ? WHERE id = ? AND title = ?", (True, user_id, alcohol_title))
+    con.commit()
+    con.close()
+    print(f"Оновлено is_cooked для {alcohol_title} користувача {user_id}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
