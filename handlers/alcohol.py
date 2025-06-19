@@ -243,7 +243,7 @@ async def view_inventory(message: Message):
         return
 
     # Отримання записів інвентарю для користувача
-    cur.execute("SELECT title, exposure, value FROM alcohol_inventory WHERE id = ?", (user_id,))
+    cur.execute("SELECT title, exposure, value, is_cooked FROM alcohol_inventory WHERE id = ?", (user_id,))
     rows = cur.fetchall()
     con.close()
 
@@ -252,7 +252,7 @@ async def view_inventory(message: Message):
         return
 
     # Формування повідомлення з інвентарем
-    inventory_list = "\n".join([f"Назва: {title}, Витримка: {exposure} днів, Ціна: {value}" for title, exposure, value in rows])
+    inventory_list = "\n".join([f"Назва: {title}, Витримка: {exposure} днів, Ціна: {value}, Готовність: {is_cooked} " for title, exposure, value, is_cooked in rows])
     await message.answer(f"Ваш інвентар:\n{inventory_list}")
 
 async def get_all_available_processes():
